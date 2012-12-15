@@ -1,0 +1,23 @@
+#N canvas 397 159 940 544 10;
+#X obj 123 100 inlet;
+#X obj 151 349 outlet~;
+#X obj 170 235 metro;
+#X obj 170 211 t b f;
+#X obj 123 125 s \$0-FILENAME;
+#X obj 256 96 inlet;
+#X obj 256 123 s \$0-LOOP-LENGTH;
+#X obj 186 257 r \$0-FILENAME;
+#X obj 170 183 r \$0-LOOP-LENGTH;
+#X obj 156 260 bng 15 250 50 0 empty empty empty 17 7 0 10 -262144
+-1 -1;
+#X obj 152 315 time_stretch;
+#X connect 0 0 4 0;
+#X connect 2 0 9 0;
+#X connect 3 0 2 0;
+#X connect 3 1 2 1;
+#X connect 3 1 10 2;
+#X connect 5 0 6 0;
+#X connect 7 0 10 1;
+#X connect 8 0 3 0;
+#X connect 9 0 10 0;
+#X connect 10 0 1 0;
