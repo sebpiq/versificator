@@ -18,12 +18,11 @@ logger.addHandler(handler)
 import soundcloud
 import requests
 
-sys.path.append(os.path.abspath('./soundlab'))
+import settings
+sys.path.append(os.path.abspath(settings.app_root + 'soundlab'))
 from soundlab import Sound, DataSet
 from BeatFinder import get_tempo
 import OSC
-
-import settings
 
 
 def get_sound():
@@ -50,7 +49,7 @@ def get_sound():
         logger.info('downloading track %s' % track.stream_url)
         resp = requests.get(track_stream.location)
         if resp.status_code == 200:
-            filename = './downloads/%s.mp3' % track_id
+            filename = settings.app_root + 'downloads/%s.mp3' % track_id
             logger.info('saving track to %s' % filename)
             try:
                 with open(filename, 'wb') as fd:
@@ -137,10 +136,11 @@ if __name__ == '__main__':
         # Extracting a loop and saving it to 'loop.wav'
         global loop_file_ind
         new_loop_filename = 'loop%s.wav' % loop_file_ind
-        extract_loop(sound[offset:offset+sample_length]).to_file('patch/' + new_loop_filename)
+        new_loop_path = settings.app_root + 'patch/' + new_loop_filename
+        extract_loop(sound[offset:offset+sample_length]).to_file(new_loop_path)
         loop_file_ind = (loop_file_ind + 1) % 2 # rotate between loop file names
         logger.info('sending new loop %s' % new_loop_filename)
-        send_msg('/new_loop', new_loop_filename)
+        send_msg('/new_loop', new_loop_path)
 
         # If the sound has already been used twice for a loop,
         # or if the offset is too close to the end of the file,
@@ -166,10 +166,11 @@ if __name__ == '__main__':
         sound = pad_pool.pop(0)
         global pad_file_ind
         new_pad_filename = 'pad%s.wav' % pad_file_ind
-        sound.to_file('patch/%s' % new_pad_filename)
+        new_pad_path = settings.app_root + 'patch/' + new_pad_filename
+        sound.to_file(new_pad_path)
         pad_file_ind = (pad_file_ind + 1) % 2 # rotate between pad file names
         logger.info('sending new pad %s' % new_pad_filename)
-        send_msg('/new_pad', new_pad_filename)
+        send_msg('/new_pad', new_pad_path)
         fill_pad_pool()
 
 
@@ -195,9 +196,9 @@ if __name__ == '__main__':
 
     # starting the pd patch
     logger.info('*INIT* starting pd patch')
-    subprocess.Popen(['pd-extended', '-nrt', '-nogui', 'patch/main.pd'],
+    subprocess.Popen(['pd-extended', '-nrt', '-nogui', '-d' , '1', settings.app_root + 'patch/main.pd'],
         stdout=open(os.devnull, 'w'),
-        stderr=open(os.devnull, 'w'))
+        stderr=sys.stderr)
 
     # Pre-downloading some sounds, and sending a message to the patch
     # when this is done. 

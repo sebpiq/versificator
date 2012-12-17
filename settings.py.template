@@ -1,1 +1,2 @@
 icecast_password = 'SECRET'
+app_root = '/path/to/app/'
