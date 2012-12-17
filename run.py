@@ -8,21 +8,25 @@ import subprocess
 import sys
 random.seed(time.time())
 import logging
+import signal
+
+# Application logger
 LOG_LEVEL = logging.INFO
 logger = logging.getLogger(__name__)
 handler = logging.StreamHandler()
 logger.setLevel(LOG_LEVEL)
 handler.setLevel(LOG_LEVEL)
-logger.addHandler(handler)
 
-import soundcloud
 import requests
-
-import settings
-sys.path.append(os.path.abspath(settings.app_root + 'soundlab'))
-from soundlab import Sound, DataSet
-from BeatFinder import get_tempo
+# Less log messages from requests
+requests_log = logging.getLogger('requests')
+requests_log.setLevel(logging.WARNING)
 import OSC
+import settings
+import soundcloud
+from pyechonest import config
+config.ECHO_NEST_API_KEY = settings.echonest_api_key
+from pychedelic import Sound
 
 
 def get_sound():
@@ -69,34 +73,21 @@ def get_sound():
         except MemoryError:
             continue
         else:
-            sound.track_id = track_id
             return sound
     
 
 def extract_loop(sound):
-    bpms, energies = get_tempo(sound)
-    bpms_data = DataSet(bpms, data=energies)
-    bpms_data = bpms_data.smooth().maxima()
-    bpm = bpms_data.axes[0][bpms_data.data == np.amax(bpms_data.data)][0]
-    while(True):
-        bpm /= 2.0
-        lower = bpm - bpm * 0.02
-        upper = bpm + bpm * 0.02
-        for possible in bpms_data.axes[0]:
-            if possible > lower and possible < upper: break
-        else: break
-    loop_length = 60.0 / bpm
-    offset = sound.axes[0][0]
-    sound = sound[offset:offset + loop_length]
+    """
+    Takes a sound and extracts a loop from it. If no loop could be extracted, `None` is returned.
+    """
+    # Filter bars that only have a minimum confidence
+    bars = sound.echonest.bars
+    bars = filter(lambda bar: bar['confidence'] > 0.1, bars)
+    if not bars: return
 
-    window_size = 100
-    sustain = np.ones(sound.sample_count - window_size)
-    fade = (np.exp(np.linspace(0, np.log(100), window_size)) - 1) / (100 - 1)
-    fade_in = np.hstack((fade, sustain))
-    fade_out = np.hstack((sustain, fade[::-1]))
-    sound._data[:,0] *= fade_in
-    sound._data[:,0] *= fade_out
-    return sound
+    # Extract the bar with the strongest confidence  
+    bars = sorted(sound.echonest.bars, key=lambda bar: -bar['confidence'])
+    return sound.ix[float(bars[0]['start']):float(bars[0]['start']+bars[0]['duration'])]
 
 
 def send_msg(address, *args):
@@ -111,47 +102,62 @@ def send_msg(address, *args):
 if __name__ == '__main__':
 
     # -------- LOOPS --------#
-    loop_pool = {}
-    sample_length = 10
-    loop_file_ind = 0
+    LOOP_POOL = []
+    LOOP_POOL_MIN = 5
+    LOOP_IND = 0
+    LOOP_READ = [] # TODO
+    SAMPLE_LENGTH = 20
+
     def fill_loop_pool():
-        # We have max 2 sounds in our pool of sounds for loops
-        while len(loop_pool) < 2:
+        """
+        This fills up the loop pool until there is at least `LOOP_POOL_MIN` loops in it. 
+        """
+        logger.info('filling-up loop pool')
+        global LOOP_IND
+
+        # We always have min 2 loops in our pool
+        while len(LOOP_POOL) < LOOP_POOL_MIN:
             sound = get_sound()
-            if sound.length > 2 * sample_length:
-                loop_pool[sound.track_id] = {
-                    'sound': sound,
-                    'offset': 0,
-                    'used': 0
-                }
+
+            # Check if the sound is long enough, and if yes we extract some loops from it.
+            if sound.length > 2 * SAMPLE_LENGTH:
+                offset = 0
+                upper_limit = sound.length - 2 * SAMPLE_LENGTH
+                while(offset + 2 * SAMPLE_LENGTH < upper_limit):
+
+                    # Calculate a random offset where the loop will start
+                    offset = random.randint(offset, int(min(offset + sound.length * 0.2, upper_limit)))
+
+                    # Extracting a loop and saving it to 'loop<n>.wav'
+                    loop_filename = 'loop%s.wav' % LOOP_IND
+                    loop_path = settings.app_root + 'patch/' + loop_filename
+                    sample = sound.ix[float(offset):float(offset+SAMPLE_LENGTH)]
+                    loop = extract_loop(sample)
+                    if loop is not None:
+                        logger.info('loop extracted to %s' % loop_path)
+                        loop.to_file(loop_path)
+                        LOOP_POOL.append({'path': loop_path, 'length': loop.length})
+                        LOOP_IND = (LOOP_IND + 1) % 1000 # rotate between loop file names
+
+                    # Increment values for next loop
+                    offset += SAMPLE_LENGTH
+
 
     def new_loop_handler(addr, tags, data, source):
-        # Picking a random sound in the pool, calculate a random offset
-        # where the loop will start
-        sound_infos = random.choice(loop_pool.values())
-        sound, offset = sound_infos['sound'], sound_infos['offset']
-        upper_limit = sound.length - 2 * sample_length
-        offset = random.randint(offset, int(min(offset + sound.length * 0.2, upper_limit)))
+        required_length = data[0]
 
-        # Extracting a loop and saving it to 'loop.wav'
-        global loop_file_ind
-        new_loop_filename = 'loop%s.wav' % loop_file_ind
-        new_loop_path = settings.app_root + 'patch/' + new_loop_filename
-        extract_loop(sound[offset:offset+sample_length]).to_file(new_loop_path)
-        loop_file_ind = (loop_file_ind + 1) % 2 # rotate between loop file names
-        logger.info('sending new loop %s' % new_loop_filename)
-        send_msg('/new_loop', new_loop_path)
+        # Picking loop in the pool with closest required length
+        # time stretching it, apply some fade in / out.
+        loop_infos = sorted(LOOP_POOL, key=lambda l: abs(l['length'] - required_length))[0]
+        loop = Sound.from_file(loop_infos['path'])
+        loop.time_stretch(required_length).fade(in_dur=0.003, out_dur=0.003).to_file(loop_infos['path'])
 
-        # If the sound has already been used twice for a loop,
-        # or if the offset is too close to the end of the file,
-        # we trash the sound.
-        sound_infos['used'] = sound_infos['used'] + 1
-        if sound_infos['used'] > 2 or offset + 2 * sample_length > upper_limit:
-            loop_pool.pop(sound.track_id)
-            logger.info('sound exhausted, getting new sounds ...')
-            fill_loop_pool()
-        else:
-            sound_infos['offset'] = offset + sample_length # we don't want to pick same loop again
+        # Sending loop, removing it from the pool
+        # and filling up the pool if necessary.
+        logger.info('sending new loop %s, still %s in pool' % (loop_infos['path'], len(LOOP_POOL)))
+        send_msg('/new_loop', loop_infos['path'])
+        LOOP_POOL.pop(LOOP_POOL.index(loop_infos))
+        if len(LOOP_POOL) < LOOP_POOL_MIN: fill_loop_pool()
 
 
     # -------- PADS --------#
@@ -159,7 +165,7 @@ if __name__ == '__main__':
     pad_file_ind = 0
     def fill_pad_pool():
         # We have max 2 sounds in our pool of sounds for pads
-        while len(pad_pool) < 2:
+        while len(pad_pool) < 1:#2: TODO
             pad_pool.append(get_sound())
 
     def new_pad_handler(addr, tags, data, source):
@@ -192,11 +198,12 @@ if __name__ == '__main__':
     def init_server():
         server.serve_forever()
     osc_server_thread = threading.Thread(target=init_server)
+    osc_server_thread.daemon = True
     osc_server_thread.start()
 
     # starting the pd patch
     logger.info('*INIT* starting pd patch')
-    subprocess.Popen(['pd-extended', '-nrt', '-nogui', '-d' , '1', settings.app_root + 'patch/main.pd'],
+    subprocess.Popen(['pd-extended', '-nrt', settings.app_root + 'patch/main.pd'],
         stdout=open(os.devnull, 'w'),
         stderr=sys.stderr)
 
@@ -209,9 +216,15 @@ if __name__ == '__main__':
 
     # Starting the main loop
     main_loop_event = threading.Event()
-    main_loop_timer = threading.Timer(30.0, lambda: main_loop_event.set())
-    while(True):
+    # Hack for stopping the main loop when ctrlc is pressed
+    stop_flag = False
+    def ctrlc_handler(signal, frame):
+        logger.info('stopping')
+        global stop_flag
+        stop_flag = True
+    signal.signal(signal.SIGINT, ctrlc_handler)
+    while(not stop_flag):
+        main_loop_timer = threading.Timer(30.0, lambda: main_loop_event.set())
+        main_loop_timer.start()
         main_loop_event.wait()
-        print "MAIN LOOP"
         main_loop_event.clear()
-    

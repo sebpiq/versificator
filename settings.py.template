@@ -1,2 +1,3 @@
 icecast_password = 'SECRET'
 app_root = '/path/to/app/'
+echonest_api_key = 'SECRET'
