@@ -207,6 +207,8 @@ if __name__ == '__main__':
             pad_pool.append(get_sound())
 
     def new_pad_handler(addr, tags, data, source):
+        # We prefer filling-up the pool afterhand, but if there's no choice ...
+        if len(pad_pool) == 0: fill_pad_pool()
         sound = pad_pool.pop(0)
         global pad_file_ind
         new_pad_filename = 'pad%s.wav' % pad_file_ind
