@@ -100,66 +100,104 @@ def send_msg(address, *args):
 
 
 if __name__ == '__main__':
+    # TODO: log thread ids
 
     # -------- LOOPS --------#
-    LOOP_POOL = []
-    LOOP_POOL_MIN = 5
-    LOOP_IND = 0
-    LOOP_READ = [] # TODO
-    SAMPLE_LENGTH = 20
+    class LoopScraper(threading.Thread):
+        pool = []                       # Pool containing the loops
+        pool_lock = threading.RLock()   # Lock to access the pool
+        names_lock = threading.RLock()  # Lock to get a unique name for a loop
+        pool_min_size = 15              # Pool will always contain at least that much loops
+        lcounter = 0                    # Counter used to "uniquely" name the loops
+        threads = []                    # All loop scrapers threads
+        sample_length = 20              # Length (in s.) to sample from the original sound
 
-    def fill_loop_pool():
-        """
-        This fills up the loop pool until there is at least `LOOP_POOL_MIN` loops in it. 
-        """
-        logger.info('filling-up loop pool')
-        global LOOP_IND
+        def __init__(self, *args, **kwargs):
+            super(LoopScraper, self).__init__(*args, **kwargs)
+            self.more_loops_event = threading.Event()   # Event to set to send the thread back to work 
+            self.daemon = True
+            self.__class__.threads.append(self)
 
-        # We always have min 2 loops in our pool
-        while len(LOOP_POOL) < LOOP_POOL_MIN:
-            sound = get_sound()
+        def run(self):
+            """
+            This fills up the loop pool until there is at least `pool_min_size` loops in it. 
+            """
+            while (True):
+                # We always have min 2 loops in our pool
+                while len(self.pool) < self.pool_min_size:
+                    sound = get_sound()
 
-            # Check if the sound is long enough, and if yes we extract some loops from it.
-            if sound.length > 2 * SAMPLE_LENGTH:
-                offset = 0
-                upper_limit = sound.length - 2 * SAMPLE_LENGTH
-                while(offset + 2 * SAMPLE_LENGTH < upper_limit):
+                    # Check if the sound is long enough, and if yes we extract some loops from it.
+                    if sound.length > 2 * self.sample_length:
+                        offset = 0
+                        upper_limit = sound.length - 2 * self.sample_length
+                        while(offset + 2 * self.sample_length < upper_limit):
 
-                    # Calculate a random offset where the loop will start
-                    offset = random.randint(offset, int(min(offset + sound.length * 0.2, upper_limit)))
+                            # Calculate a random offset where the loop will start
+                            offset = random.randint(offset, int(min(offset + sound.length * 0.2, upper_limit)))
 
-                    # Extracting a loop and saving it to 'loop<n>.wav'
-                    loop_filename = 'loop%s.wav' % LOOP_IND
-                    loop_path = settings.app_root + 'patch/' + loop_filename
-                    sample = sound.ix[float(offset):float(offset+SAMPLE_LENGTH)]
-                    loop = extract_loop(sample)
-                    if loop is not None:
-                        logger.info('loop extracted to %s' % loop_path)
-                        loop.to_file(loop_path)
-                        LOOP_POOL.append({'path': loop_path, 'length': loop.length})
-                        LOOP_IND = (LOOP_IND + 1) % 1000 # rotate between loop file names
+                            # Extracting a loop and saving it to 'loop<n>.wav'
+                            sample = sound.ix[float(offset):float(offset+self.sample_length)]
+                            loop = extract_loop(sample)
+                            if loop is not None:
+                                loop_path = self._get_loop_path()
+                                logger.info('loop extracted to %s' % loop_path)
+                                loop.to_file(loop_path)
+                                key, key_confidence = loop.echonest.key, loop.echonest.key_confidence
+                                with self.pool_lock:
+                                    self.pool.append({
+                                        'path': loop_path,
+                                        'length': loop.length,
+                                        'key': (key, key_confidence)
+                                    })
 
-                    # Increment values for next loop
-                    offset += SAMPLE_LENGTH
+                            # Increment values for next loop
+                            offset += self.sample_length
+                self.more_loops_event.wait()
+                self.more_loops_event.clear()
+
+        def _get_loop_path(self):
+            """
+            This returns the filepath for the next loop to use.
+            """
+            with self.names_lock:
+                loop_filename = 'loop%s.wav' % self.__class__.lcounter
+                loop_path = settings.app_root + 'patch/' + loop_filename
+                self.__class__.lcounter = (self.__class__.lcounter + 1) % 1000
+                return loop_path
+
+        @classmethod
+        def gimme_loop(cls, length, key):
+            with cls.pool_lock:
+                loop_infos = sorted(cls.pool, key=lambda l: abs(l['length'] - required_length))[0]
+                cls.loop.pop(cls.loop.index(loop_infos))
+            logger.info('sending new loop %s, still %s in pool' % (loop_infos['path'], len(cls.pool)))
+            return loop_infos
+
+        @classmethod
+        def scrape_more(cls):
+            for t in cls.threads: t.more_loops_event.set()
+
+
+    # Start 3 loop scrapers
+    for i in range(3): LoopScraper().start()
 
 
     def new_loop_handler(addr, tags, data, source):
-        required_length = data[0]
+        # time in seconds; key between 0 (for C) and 11 (for B)
+        required_length, required_key = data[0], data[1]
 
         # Picking loop in the pool with closest required length
         # time stretching it, apply some fade in / out.
-        loop_infos = sorted(LOOP_POOL, key=lambda l: abs(l['length'] - required_length))[0]
+        loop_infos = LoopScraper.gimme_loop(required_length, required_key)
         loop = Sound.from_file(loop_infos['path'])
         loop.time_stretch(required_length).fade(in_dur=0.003, out_dur=0.003).to_file(loop_infos['path'])
 
-        # Sending loop, removing it from the pool
-        # and filling up the pool if necessary.
-        logger.info('sending new loop %s, still %s in pool' % (loop_infos['path'], len(LOOP_POOL)))
+        # Sending loop, and fill-up the pool if necessary.
         send_msg('/new_loop', loop_infos['path'])
-        LOOP_POOL.pop(LOOP_POOL.index(loop_infos))
-        if len(LOOP_POOL) < LOOP_POOL_MIN: fill_loop_pool()
+        if len(LoopScraper.loop_pool) < LoopScraper.pool_min_size: LoopScraper.scrape_more()
 
-
+    '''
     # -------- PADS --------#
     pad_pool = []
     pad_file_ind = 0
@@ -208,11 +246,12 @@ if __name__ == '__main__':
         stderr=sys.stderr)
 
     # Pre-downloading some sounds, and sending a message to the patch
-    # when this is done. 
-    fill_loop_pool()
+    # when this is done.
     fill_pad_pool()
     send_msg('/init/ready')
     logger.info('*INIT* telling the patch things are ready')
+
+    '''
 
     # Starting the main loop
     main_loop_event = threading.Event()

@@ -1,4 +1,4 @@
-#N canvas 200 145 1373 593 10;
+#N canvas 198 150 1373 593 10;
 #X declare -lib mrpeach;
 #X obj 566 14 r \$0-NEW-LOOP;
 #X obj 3 419 catch~ \$0-OUT-L;
@@ -93,7 +93,7 @@
 -1 -1;
 #X obj 514 249 throw~ \$0-OUT-L;
 #X obj 584 291 throw~ \$0-OUT-R;
-#X msg 17 264 send /gimme_pad;
+#X msg 17 275 send /gimme_pad;
 #X obj 543 130 loop;
 #X obj 673 129 loop;
 #X obj 898 55 del 500;
@@ -276,7 +276,8 @@
 #X obj 17 334 s \$0-OSC-SEND;
 #X obj 60 87 r \$0-READY;
 #X obj 221 620 dac~;
-#X msg 154 263 send /gimme_loop 1;
+#X msg 154 274 send /gimme_loop 1 0;
+#X text 160 252 /gimme_loop <length in seconds> <key>;
 #X connect 0 0 5 0;
 #X connect 1 0 12 0;
 #X connect 1 0 13 0;
