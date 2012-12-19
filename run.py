@@ -201,7 +201,7 @@ if __name__ == '__main__':
 
     # starting the pd patch
     logger.info('*INIT* starting pd patch')
-    subprocess.Popen(['pd-extended', '-nrt', '-nogui', '-d' , '1', settings.app_root + 'patch/main.pd'],
+    subprocess.Popen(['pd-extended', '-nrt', '-nogui', settings.app_root + 'patch/main.pd'],
         stdout=open(os.devnull, 'w'),
         stderr=sys.stderr)
 
