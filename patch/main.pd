@@ -1,4 +1,4 @@
-#N canvas 192 103 1407 796 10;
+#N canvas 190 103 1407 796 10;
 #X declare -lib mrpeach;
 #X msg 154 263 send /gimme_loop;
 #X obj 566 14 r \$0-NEW-LOOP;
@@ -179,7 +179,7 @@
 #X obj 18 132 metro 60000;
 #X obj 18 156 random 60000;
 #X obj 687 392 loadbang;
-#N canvas 310 153 1079 705 communication 1;
+#N canvas 308 158 1079 705 communication 1;
 #X floatatom 82 377 10 0 0 0 - - -;
 #X msg 64 238 vorbis 44100 2 144 128 96;
 #X msg 96 164 server 1;
@@ -269,6 +269,7 @@
 #X connect 40 1 1 0;
 #X connect 40 1 7 0;
 #X connect 40 1 47 0;
+#X connect 40 1 46 0;
 #X connect 40 2 2 0;
 #X connect 40 2 45 0;
 #X connect 40 3 41 0;
