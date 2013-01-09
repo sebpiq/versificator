@@ -8,6 +8,7 @@ import sys
 import logging
 import signal
 import traceback
+import gc
 
 # Application logger
 LOG_LEVEL = logging.INFO
@@ -34,7 +35,6 @@ class ScraperType(type):
             pool = [],                      # Pool containing the loops
             pool_lock = threading.RLock(),  # Lock to access the pool
             pool_min_size = 15,             # Pool will always contain at least that much loops
-            threads = [],                   # All loop scrapers threads
             names_lock = threading.RLock(), # Lock to get a unique name for a sound file to save
             name_counter = 0,               # Counter used to "uniquely" name the soudn files
             filename_prefix = ''
@@ -49,23 +49,21 @@ class BaseScraper(threading.Thread):
 
     def __init__(self, *args, **kwargs):
         super(BaseScraper, self).__init__(*args, **kwargs)
-        self.more_loops_event = threading.Event()   # Event to set to send the thread back to work 
         self.daemon = True
-        self.__class__.threads.append(self)
 
     def run(self):
         """
         This fills up the loop pool until there is at least `pool_min_size` loops in it.
         The method which actually fills-up the pool is `scrape`.
         """
-        while (True):
+        while (len(self.pool) < self.pool_min_size):
             # Protect from exceptions
             try:
                 # We always have at least `pool_min_size` loops in our pool
-                while len(self.pool) < self.pool_min_size: self.scrape()
-                self.sleep()
+                self.scrape()
             except:
                 print traceback.format_exc()
+        logger.info('harakiri %s' % self)
 
     def scrape(self):
         """
@@ -73,16 +71,10 @@ class BaseScraper(threading.Thread):
         """
         raise NotImplementedError()
 
-    def sleep(self):
-        self.more_loops_event.wait()
-        self.more_loops_event.clear()
-
-    def wake_up(self):
-        self.more_loops_event.set()
-
     @classmethod
     def wake_up_scrapers(cls):
-        for t in cls.threads: t.wake_up()
+        logger.info('waking up scrapers %s' % cls)
+        for i in range(1): cls().start()
 
     def _get_free_path(self):
         """
@@ -100,31 +92,41 @@ class BaseScraper(threading.Thread):
 class LoopScraper(BaseScraper):
     sample_length = 20              # Length (in s.) to sample from the original sound
     filename_prefix = 'loop'
+    pool_min_size = 3
 
     def scrape(self):
         sound = get_sound()
 
         # Check if the sound is long enough, and if yes we extract some loops from it.
+        # TODO: make this less restrictive
         if sound.length > 2 * self.sample_length:
             offset = 0
             upper_limit = sound.length - 2 * self.sample_length
-            while(offset + 2 * self.sample_length < upper_limit):
+            while (offset + 2 * self.sample_length < upper_limit):
 
                 # Calculate a random offset where the loop will start
                 offset = random.randint(offset, int(min(offset + sound.length * 0.2, upper_limit)))
 
                 # Extracting a loop and saving it to 'loop<n>.wav'
                 sample = sound.ix[float(offset):float(offset+self.sample_length)]
+
                 loop = extract_loop(sample)
                 if loop is not None:
                     loop_path = self._get_free_path()
                     logger.info('loop extracted to %s' % loop_path)
                     loop.to_file(loop_path)
-                    key, key_confidence = loop.echonest.key, loop.echonest.key_confidence
+                    key, key_confidence, length = loop.echonest.key, loop.echonest.key_confidence, loop.length
+
+                    # Delete the sounds to save memory
+                    # We also have to collect manually because of a "bug" in pandas:
+                    # https://github.com/pydata/pandas/issues/2659
+                    del loop; del sample
+                    gc.collect()
+
                     with self.pool_lock:
                         self.pool.append({
                             'path': loop_path,
-                            'length': loop.length,
+                            'length': length,
                             'key': (key, key_confidence)
                         })
 
@@ -145,17 +147,16 @@ class LoopScraper(BaseScraper):
 
         loop = Sound.from_file(loop_infos['path'])
         loop.time_stretch(required_length).fade(in_dur=0.003, out_dur=0.003).to_file(loop_infos['path'])
+        loop.fade(in_dur=0.003, out_dur=0.003).to_file(loop_infos['path'])
 
         # Sending loop, and fill-up the pool if necessary.
         send_msg('/new_loop', loop_infos['path'])
         if len(LoopScraper.pool) < LoopScraper.pool_min_size: LoopScraper.wake_up_scrapers()
-# Start 3 loop scrapers
-for i in range(3): LoopScraper().start()
 
 
 class PadScraper(BaseScraper):
 
-    pool_min_size = 5
+    pool_min_size = 3
     filename_prefix = 'pad'
 
     def scrape(self):
@@ -163,6 +164,13 @@ class PadScraper(BaseScraper):
         pad_path = self._get_free_path()
         logger.info('pad extracted to %s' % pad_path)
         pad.to_file(pad_path)
+
+        # Delete the sound to save memory
+        # We also have to collect manually because of a "bug" in pandas:
+        # https://github.com/pydata/pandas/issues/2659 
+        del pad
+        gc.collect()
+
         with self.pool_lock:
             self.pool.append({
                 'path': pad_path
@@ -171,52 +179,59 @@ class PadScraper(BaseScraper):
     @classmethod
     def gimme_pad_handler(cls, addr, tags, data, source):
         with cls.pool_lock:
-            pad_infos = self.pool.pop(0)
-        logger.info('sending new pad %s' % pad_infos['path'])
+            pad_infos = cls.pool.pop(0)
+        logger.info('sending new pad %s, still %s in pool' % (pad_infos['path'], len(cls.pool)))
         send_msg('/new_pad', pad_infos['path'])
         if len(PadScraper.pool) < PadScraper.pool_min_size: PadScraper.wake_up_scrapers()
-# Start 2 pad scrapers
-for i in range(3): PadScraper().start()
 
 
-# -------- SERVER --------#
-server = OSC.OSCServer(('localhost', 9000))
-OSC.OSCServer.print_tracebacks = True
+if __name__ == '__main__':
+    # Start scrapers
+    for i in range(3): LoopScraper().start()
+    for i in range(2): PadScraper().start()
 
-# this registers a 'default' handler (for unmatched messages),
-# an /'error' handler, an '/info' handler.
-server.addDefaultHandlers()
-def init_handler(addr, tags, data, source):
-    logger.info('*INIT* send init infos to the pd patch')
-    send_msg('/init/pwd', settings.icecast_password)
-server.addMsgHandler('/init', init_handler)
-server.addMsgHandler('/gimme_loop', LoopScraper.gimme_loop_handler)
-server.addMsgHandler('/gimme_pad', PadScraper.gimme_pad_handler)
+    # Start server
+    server = OSC.OSCServer(('localhost', 9000))
+    OSC.OSCServer.print_tracebacks = True
 
-# Starting the OSC server in a new thread
-def init_server():
-    server.serve_forever()
-osc_server_thread = threading.Thread(target=init_server)
-osc_server_thread.daemon = True
-osc_server_thread.start()
+    # this registers a 'default' handler (for unmatched messages),
+    # an /'error' handler, an '/info' handler.
+    server.addDefaultHandlers()
+    def init_handler(addr, tags, data, source):
+        logger.info('*INIT* send init infos to the pd patch')
+        send_msg('/init/pwd', settings.icecast_password)
+    server.addMsgHandler('/init', init_handler)
+    server.addMsgHandler('/gimme_loop', LoopScraper.gimme_loop_handler)
+    server.addMsgHandler('/gimme_pad', PadScraper.gimme_pad_handler)
 
-# starting the pd patch
-logger.info('*INIT* starting pd patch')
-subprocess.Popen(['pd-extended', '-nrt', settings.app_root + 'patch/main.pd'],
-    stdout=open(os.devnull, 'w'),
-    stderr=sys.stderr)
+    # Starting the OSC server in a new thread
+    def init_server():
+        server.serve_forever()
+    osc_server_thread = threading.Thread(target=init_server)
+    osc_server_thread.daemon = True
+    osc_server_thread.start()
 
-# Pre-downloading some sounds, and sending a message to the patch
-# when this is done.
-# TODO: doesn't work anymore now that separate threads handle scraping
-send_msg('/init/ready')
-logger.info('*INIT* telling the patch things are ready')
+    # starting the pd patch
+    logger.info('*INIT* starting pd patch')
+    subprocess.Popen(['pd-extended', '-nrt', settings.app_root + 'patch/main.pd'],
+        stdout=open(os.devnull, 'w'),
+        stderr=sys.stderr)
 
+    # Hack to have a passive "sleep" that can be interrupted with ctrl-c
+    # ... with `threading.Timer` it doesn't work.
+    from Queue import Queue, Empty
 
-# Hack to have a passive "sleep" that can be interrupted with ctrl-c
-# ... with `threading.Timer` it doesn't work.
-from Queue import Queue, Empty
-while(True):
-    q = Queue()
-    try: q.get(True, 30)
-    except Empty: pass
+    # Pre-downloading some sounds, and sending a message to the patch
+    # when this is done.
+    while(len(PadScraper.pool) < PadScraper.pool_min_size
+          or len(LoopScraper.pool) < LoopScraper.pool_min_size / 3.0):
+        q = Queue()
+        try: q.get(True, 5)
+        except Empty: pass
+    send_msg('/init/ready')
+    logger.info('*INIT* telling the patch things are ready')
+
+    while(True):
+        q = Queue()
+        try: q.get(True, 30)
+        except Empty: pass

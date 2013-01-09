@@ -6,6 +6,7 @@ import OSC
 import requests
 import settings
 import soundcloud
+import traceback
 import logging
 logger = logging.getLogger('versificator')
 # Less log messages from requests
@@ -16,6 +17,9 @@ from pychedelic import Sound
 
 
 def get_sound():
+    # TODO: finding leak ! Remove
+    #return Sound.from_file('/home/spiq/directions.mp3')
+
     # create a client object with your app credentials
     client = soundcloud.Client(client_id='YOUR_CLIENT_ID')
     track, resp = None, None
@@ -56,7 +60,7 @@ def get_sound():
         try: 
             sound = Sound.from_file(filename)
         except MemoryError:
-            logger.error('MemoryError trying to load downloaded track')
+            print traceback.format_exc()
             continue
         else:
             return sound

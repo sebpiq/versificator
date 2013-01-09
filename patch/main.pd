@@ -1,4 +1,4 @@
-#N canvas 283 111 1373 593 10;
+#N canvas 210 156 1373 593 10;
 #X declare -lib mrpeach;
 #X obj 566 -5 r \$0-NEW-LOOP;
 #X obj 3 419 catch~ \$0-OUT-L;
@@ -171,7 +171,7 @@
 #X obj 18 132 metro 60000;
 #X obj 18 156 random 60000;
 #X obj 687 392 loadbang;
-#N canvas 178 160 1279 705 communication 1;
+#N canvas 172 175 1279 705 communication 0;
 #X floatatom 82 359 10 0 0 0 - - -;
 #X msg 64 238 vorbis 44100 2 144 128 96;
 #X msg 96 164 server 1;
@@ -218,7 +218,7 @@
 #X obj -56 290 inlet~;
 #X obj 919 -144 r \$0-READY;
 #X msg 919 -114 python ready;
-#X obj 134 64 bng 15 250 50 0 empty empty empty 17 7 0 10 -262144 -1
+#X obj 128 65 bng 15 250 50 0 empty empty empty 17 7 0 10 -262144 -1
 -1;
 #X connect 1 0 3 0;
 #X connect 2 0 3 0;
@@ -252,7 +252,6 @@
 #X connect 37 0 36 0;
 #X connect 38 0 37 0;
 #X connect 38 0 39 0;
-#X connect 38 1 20 0;
 #X connect 38 1 45 0;
 #X connect 39 1 1 0;
 #X connect 39 1 7 0;
@@ -263,6 +262,7 @@
 #X connect 42 0 3 1;
 #X connect 43 0 44 0;
 #X connect 44 0 31 0;
+#X connect 45 0 20 0;
 #X restore 43 616 pd communication;
 #X obj 17 334 s \$0-OSC-SEND;
 #X obj 60 87 r \$0-READY;
@@ -275,6 +275,7 @@
 #X obj 543 130 loop;
 #X obj 673 129 loop;
 #X obj 566 20 pack s f;
+#X msg 147 37 stop;
 #X connect 0 0 62 0;
 #X connect 1 0 8 0;
 #X connect 1 0 9 0;
@@ -364,3 +365,5 @@
 #X connect 60 0 29 0;
 #X connect 61 0 30 0;
 #X connect 62 0 5 0;
+#X connect 63 0 48 0;
+#X connect 63 0 18 0;
