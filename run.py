@@ -95,21 +95,20 @@ class LoopScraper(BaseScraper):
     pool_min_size = 3
 
     def scrape(self):
-        sound = get_sound()
+        filename, sound_length = get_sound()
 
         # Check if the sound is long enough, and if yes we extract some loops from it.
-        # TODO: make this less restrictive
-        if sound.length > 2 * self.sample_length:
+        # TODO: make this less restrictive to waste a bit less
+        if sound_length > 2 * self.sample_length:
             offset = 0
-            upper_limit = sound.length - 2 * self.sample_length
+            upper_limit = sound_length - 2 * self.sample_length
             while (offset + 2 * self.sample_length < upper_limit):
 
                 # Calculate a random offset where the loop will start
-                offset = random.randint(offset, int(min(offset + sound.length * 0.2, upper_limit)))
+                offset = random.randint(offset, int(min(offset + sound_length * 0.2, upper_limit)))
 
                 # Extracting a loop and saving it to 'loop<n>.wav'
-                sample = sound.ix[float(offset):float(offset+self.sample_length)]
-
+                sample = Sound.from_file(filename, start=offset, end=offset+self.sample_length)
                 loop = extract_loop(sample)
                 if loop is not None:
                     loop_path = self._get_free_path()
@@ -160,16 +159,15 @@ class PadScraper(BaseScraper):
     filename_prefix = 'pad'
 
     def scrape(self):
-        pad = get_sound()
-        pad_path = self._get_free_path()
+        pad_path, pad_length = get_sound()
         logger.info('pad extracted to %s' % pad_path)
-        pad.to_file(pad_path)
+        '''pad.to_file(pad_path)
 
         # Delete the sound to save memory
         # We also have to collect manually because of a "bug" in pandas:
         # https://github.com/pydata/pandas/issues/2659 
         del pad
-        gc.collect()
+        gc.collect()'''
 
         with self.pool_lock:
             self.pool.append({
@@ -231,7 +229,9 @@ if __name__ == '__main__':
     send_msg('/init/ready')
     logger.info('*INIT* telling the patch things are ready')
 
+    from guppy import hpy; hp=hpy()
     while(True):
         q = Queue()
         try: q.get(True, 30)
         except Empty: pass
+        print hp.heap()

@@ -17,8 +17,10 @@ from pychedelic import Sound
 
 
 def get_sound():
-    # TODO: finding leak ! Remove
-    #return Sound.from_file('/home/spiq/directions.mp3')
+    """
+    Downloads a random sound from soundcloud, saves it and returns 
+    the filename and the sound length in seconds.
+    """
 
     # create a client object with your app credentials
     client = soundcloud.Client(client_id='YOUR_CLIENT_ID')
@@ -37,7 +39,8 @@ def get_sound():
 
         # Downloading track.
         # We don't want too long tracks because of memory pbs.
-        if track.duration > 60 * 5000: continue
+        sound_length = track.duration
+        if sound_length > 60 * 5000: continue
         if not hasattr(track, 'stream_url'): continue
         track_stream = client.get(track.stream_url, allow_redirects=False)
         logger.info('downloading track %s' % track.stream_url)
@@ -55,18 +58,8 @@ def get_sound():
         else:
             logger.error('tried to download track, but got %s' % resp)
             continue
+        return filename, sound_length / 1000.0
 
-        # If the file is too big, this will fail
-        try: 
-            sound = Sound.from_file(filename)
-        except MemoryError:
-            print traceback.format_exc()
-            continue
-        else:
-            return sound
-        finally:
-            os.remove(filename)
-    
 
 def extract_loop(sound):
     """
