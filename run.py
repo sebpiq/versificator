@@ -146,7 +146,6 @@ class LoopScraper(BaseScraper):
 
         loop = Sound.from_file(loop_infos['path'])
         loop.time_stretch(required_length).fade(in_dur=0.003, out_dur=0.003).to_file(loop_infos['path'])
-        loop.fade(in_dur=0.003, out_dur=0.003).to_file(loop_infos['path'])
 
         # Sending loop, and fill-up the pool if necessary.
         send_msg('/new_loop', loop_infos['path'])
@@ -229,9 +228,9 @@ if __name__ == '__main__':
     send_msg('/init/ready')
     logger.info('*INIT* telling the patch things are ready')
 
-    from guppy import hpy; hp=hpy()
+    #from guppy import hpy; hp=hpy()
     while(True):
         q = Queue()
         try: q.get(True, 30)
         except Empty: pass
-        print hp.heap()
+        #print hp.heap()
