@@ -94,6 +94,7 @@ class LoopScraper(BaseScraper):
     sample_length = 20              # Length (in s.) to sample from the original sound
     filename_prefix = 'loop'
     pool_min_size = 50
+    pd_loopers = {}
     old_loops = {}
     old_loops_lock = threading.Lock()
 
@@ -115,6 +116,9 @@ class LoopScraper(BaseScraper):
                 sample = Sound.from_file(filename, start=offset, end=offset+self.sample_length)
                 loops = sample.extract_loops()
                 for loop in loops:
+                    if id_counter > 10:
+                        offset = upper_limit
+                        break
                     id_counter += 1
                     loop_id = '%s_%s' % (track_id, id_counter)
                     loop_path = self._get_free_path()
@@ -127,6 +131,7 @@ class LoopScraper(BaseScraper):
                             'path': loop_path,
                             'length': loop.length,
                             'loop_id': loop_id,
+                            'track_id': track_id,
                             'timbre_start': loop.loop_infos['timbre_start'],
                             'timbre_end': loop.loop_infos['timbre_end']
                             #'key': (key, key_confidence)
@@ -145,34 +150,67 @@ class LoopScraper(BaseScraper):
     @classmethod
     def gimme_loop_handler(cls, addr, tags, data, source):
         # time in seconds; key between 0 (for C) and 11 (for B)
-        pd_track_id, required_length, required_key, previous_loop_id = data[0], data[1], data[2], data[3]
+        pd_looper_id, required_tempo, required_key = data[0], data[1], data[2]
+        
+        # If the track hasn't been registered yet, we do that
+        pd_looper_infos = cls.pd_loopers.setdefault(pd_looper_id, {
+            'current_loop_id': None,
+            'track_ids': [],
+            'tempo': None,
+        })
+        current_loop_id = pd_looper_infos['current_loop_id']
 
         # Picking the new loop in the pool
         with cls.pool_lock:
-            if previous_loop_id != 'null':
-                loop_infos = sorted(
-                    cls.pool.values(),
-                    key=lambda l: loop_distance(cls.old_loops[previous_loop_id], l)
-                )[0]
+
+            # prefilter available loops (those whose track haven't been picked already)
+            available_loops = cls.pool.values()
+            forbidden_tracks = cls.forbidden_tracks(pd_looper_id)
+            available_loops = filter(lambda l: l['track_id'] not in forbidden_tracks, available_loops)
+
+            # Select the most suitable next loop according to the current loop.
+            if current_loop_id is not None:
+                def sort_key(l):
+                    timbre_dist = loop_distance(cls.old_loops[current_loop_id], l)
+                    tempo_dist = abs(1 - l['tempo'] / float(required_tempo)) * 40
+                    return timbre_dist + tempo_dist
+                loop_infos = sorted(available_loops, key=lambda l: sort_key)[0]
             else:
-                loop_infos = cls.pool.values()[0]
+                loop_infos = available_loops[0]
+
+            # Remove the loop from the pool, reserving the loop's track for this looper
             cls.pool.pop(loop_infos['loop_id'])
+            pd_looper_infos['track_ids'].append(loop_infos['track_id'])
+        pd_looper_infos['current_loop_id'] = loop_infos['loop_id']
 
         # Adding the picked looped to `old_loops`, so that we remember it
         # but it cannot be used again.
         with cls.old_loops_lock:
             cls.old_loops[loop_infos['loop_id']] = loop_infos
-            if previous_loop_id != 'null': cls.old_loops.pop(previous_loop_id)
+            if current_loop_id is not None: cls.old_loops.pop(current_loop_id)
 
         # Preparing the loop
-        logger.info('sending new loop %s, still %s in pool' % (loop_infos['path'], len(cls.pool)))
+        logger.info('sending new loop %s to looper %s, left : %s' % (loop_infos['path'], pd_looper_id, len(cls.pool)))
         loop = Sound.from_file(loop_infos['path'])
-        loop = loop.time_stretch(required_length).fade(in_dur=0.003, out_dur=0.003)
+        required_length = loop.length * float(required_tempo) / loop_infos['tempo']
+        beat_length = 60.0 / required_tempo
+        required_length = round(required_length / beat_length) * beat_length
+        loop = loop.time_stretch(required_length).fade(in_dur=0.002, out_dur=0.002)
         loop.to_file(loop_infos['path'])
 
         # Sending loop, and fill-up the pool if necessary.
-        send_msg('/new_loop', pd_track_id, loop_infos['path'], int(loop.length * 1000), loop_infos['loop_id'])
+        send_msg('/new_loop', pd_looper_id, loop_infos['path'], int(round(loop.length * 1000)), loop_infos['loop_id'])
         if len(LoopScraper.pool) < LoopScraper.pool_min_size: LoopScraper.wake_up_scrapers()
+
+    @classmethod
+    def forbidden_tracks(cls, looper_id):
+        """
+        Returns a list of the tracks that the looper `looper_id` cannot use
+        """
+        loopers_infos = dict(**cls.pd_loopers)
+        loopers_infos.pop(looper_id)
+        track_ids = []
+        return reduce(lambda memo, elem: memo + elem['track_ids'], loopers_infos.values(), [])
 
 
 class PadScraper(BaseScraper):
@@ -184,7 +222,9 @@ class PadScraper(BaseScraper):
         track_id, pad_path, pad_length = get_sound()
         new_pad_path = self._get_free_path()
         pad_id = '%s' % (track_id)
-        convert_file(pad_path, 'wav', to_filename=new_pad_path)
+        sound = Sound.from_file(pad_path, end=min(30, pad_length))
+        sound = sound.remove_beats()
+        sound.to_file(new_pad_path)
         logger.info('pad extracted to %s' % new_pad_path)
         '''pad.to_file(pad_path)
 
@@ -249,9 +289,9 @@ if __name__ == '__main__':
     # Pre-downloading some sounds, and sending a message to the patch
     # when this is done.
     while(len(PadScraper.pool) < PadScraper.pool_min_size
-          or len(LoopScraper.pool) < LoopScraper.pool_min_size / 10.0):
+          or len(LoopScraper.pool) < LoopScraper.pool_min_size / 30.0):
         q = Queue()
-        try: q.get(True, 5)
+        try: q.get(True, 2)
         except Empty: pass
     send_msg('/init/ready')
     logger.info('*INIT* telling the patch things are ready')
