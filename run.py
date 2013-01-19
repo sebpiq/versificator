@@ -21,9 +21,9 @@ import OSC
 import settings
 from pyechonest import config
 config.ECHO_NEST_API_KEY = settings.echonest_api_key
-from pychedelic import Sound
+from sound import Sound
 
-from tools import get_sound, extract_loop, send_msg
+from tools import get_sound, send_msg
 
 
 class ScraperType(type):
@@ -82,7 +82,7 @@ class BaseScraper(threading.Thread):
         """
         with self.names_lock:
             filename = '%s%s.wav' % (self.filename_prefix, self.__class__.name_counter)
-            path = settings.app_root + 'patch/' + filename
+            path = settings.app_root + 'sounds/' + filename
             self.__class__.name_counter = (self.__class__.name_counter + 1) % 1000
             return path
 
@@ -109,28 +109,30 @@ class LoopScraper(BaseScraper):
 
                 # Extracting a loop and saving it to 'loop<n>.wav'
                 sample = Sound.from_file(filename, start=offset, end=offset+self.sample_length)
-                loop = extract_loop(sample)
-                if loop is not None:
+                loops = sample.extract_loops()
+                for loop in loops:
                     loop_path = self._get_free_path()
                     logger.info('loop extracted to %s' % loop_path)
                     loop.to_file(loop_path)
-                    key, key_confidence, length = loop.echonest.key, loop.echonest.key_confidence, loop.length
-
-                    # Delete the sounds to save memory
-                    # We also have to collect manually because of a "bug" in pandas:
-                    # https://github.com/pydata/pandas/issues/2659
-                    del loop; del sample
-                    gc.collect()
+                    #key, key_confidence, length = loop.echonest.key, loop.echonest.key_confidence, loop.length
+                    length = loop.length
 
                     with self.pool_lock:
                         self.pool.append({
                             'path': loop_path,
                             'length': length,
-                            'key': (key, key_confidence)
+                            #'key': (key, key_confidence)
                         })
 
                 # Increment values for next loop
                 offset += self.sample_length
+
+                # Delete the sounds to save memory
+                # We also have to collect manually because of a "bug" in pandas:
+                # https://github.com/pydata/pandas/issues/2659
+                if 'loop' in locals(): del loop
+                del sample
+                gc.collect()
 
     @classmethod
     def gimme_loop_handler(cls, addr, tags, data, source):

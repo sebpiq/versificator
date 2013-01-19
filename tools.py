@@ -8,6 +8,7 @@ import settings
 import soundcloud
 import traceback
 import logging
+import numpy as np
 logger = logging.getLogger('versificator')
 # Less log messages from requests
 requests_log = logging.getLogger('requests')
@@ -61,18 +62,8 @@ def get_sound():
         return filename, sound_length / 1000.0
 
 
-def extract_loop(sound):
-    """
-    Takes a sound and extracts a loop from it. If no loop could be extracted, `None` is returned.
-    """
-    # Filter bars that only have a minimum confidence
-    bars = sound.echonest.bars
-    bars = filter(lambda bar: bar['confidence'] > 0.1, bars)
-    if not bars: return
-
-    # Extract the bar with the strongest confidence
-    bars = sorted(sound.echonest.bars, key=lambda bar: -bar['confidence'])
-    return sound.ix[float(bars[0]['start']):float(bars[0]['start']+bars[0]['duration'])]
+def euclidian_distance(a, b):
+    return np.linalg.norm(a - b)
 
 
 def send_msg(address, *args):
