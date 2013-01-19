@@ -59,11 +59,18 @@ def get_sound():
         else:
             logger.error('tried to download track, but got %s' % resp)
             continue
-        return filename, sound_length / 1000.0
+        return track_id, filename, sound_length / 1000.0
 
 
 def euclidian_distance(a, b):
-    return np.linalg.norm(a - b)
+    return np.linalg.norm(np.array(a) - np.array(b))
+
+
+def loop_distance(loop_infos1, loop_infos2):
+    """
+    Simple measure of the timbral distance between end of loop1 and start of loop2.
+    """
+    return euclidian_distance(loop_infos1['timbre_start'], loop_infos2['timbre_end'])
 
 
 def send_msg(address, *args):

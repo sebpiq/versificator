@@ -1,4 +1,4 @@
-#N canvas 296 171 940 544 10;
+#N canvas 345 198 940 544 10;
 #X obj 173 78 inlet;
 #X obj 169 315 outlet~;
 #X obj 170 235 metro;
@@ -8,9 +8,9 @@
 #X obj 170 183 r \$0-LOOP-LENGTH;
 #X obj 170 260 bng 15 250 50 0 empty empty empty 17 7 0 10 -262144
 -1 -1;
-#N canvas 0 0 450 300 (subpatch) 0;
-#X array \$0-SOUND 44100 float 2;
-#X coords 0 1 44100 -1 200 140 1;
+#N canvas 65 54 1535 846 (subpatch) 0;
+#X array \$0-SOUND 110251 float 2;
+#X coords 0 1 110251 -1 200 140 1;
 #X restore 373 184 graph;
 #X obj 639 290 soundfiler;
 #X obj 684 211 f \$0;
@@ -20,13 +20,13 @@
 #X obj 639 234 pack s f;
 #X obj 596 185 r \$0-FILENAME;
 #X obj 170 285 tabplay~ \$0-SOUND;
-#X obj 437 425 print length;
-#X obj 543 423 print filename;
-#X obj 173 101 unpack s f;
-#X connect 0 0 19 0;
+#X obj 173 101 unpack s f s;
+#X floatatom 207 235 5 0 0 0 - - -;
+#X connect 0 0 17 0;
 #X connect 2 0 7 0;
 #X connect 3 0 2 0;
 #X connect 3 1 2 1;
+#X connect 3 1 18 0;
 #X connect 6 0 3 0;
 #X connect 7 0 16 0;
 #X connect 10 0 14 1;
@@ -36,7 +36,5 @@
 #X connect 14 0 13 0;
 #X connect 15 0 14 0;
 #X connect 16 0 1 0;
-#X connect 19 0 4 0;
-#X connect 19 0 18 0;
-#X connect 19 1 5 0;
-#X connect 19 1 17 0;
+#X connect 17 0 4 0;
+#X connect 17 1 5 0;

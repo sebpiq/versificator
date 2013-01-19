@@ -22,8 +22,9 @@ import settings
 from pyechonest import config
 config.ECHO_NEST_API_KEY = settings.echonest_api_key
 from sound import Sound
+from pychedelic.utils import convert_file
 
-from tools import get_sound, send_msg
+from tools import get_sound, send_msg, loop_distance
 
 
 class ScraperType(type):
@@ -32,7 +33,7 @@ class ScraperType(type):
         # For each subclass of `BaseScraper`, we add new attributes,
         # and we don't want those to be shared between subclasses.
         defaults = dict(
-            pool = [],                      # Pool containing the loops
+            pool = {},                      # Pool containing the loops
             pool_lock = threading.RLock(),  # Lock to access the pool
             pool_min_size = 15,             # Pool will always contain at least that much loops
             names_lock = threading.RLock(), # Lock to get a unique name for a sound file to save
@@ -92,10 +93,13 @@ class BaseScraper(threading.Thread):
 class LoopScraper(BaseScraper):
     sample_length = 20              # Length (in s.) to sample from the original sound
     filename_prefix = 'loop'
-    pool_min_size = 3
+    pool_min_size = 50
+    old_loops = {}
+    old_loops_lock = threading.Lock()
 
     def scrape(self):
-        filename, sound_length = get_sound()
+        id_counter = 0
+        track_id, filename, sound_length = get_sound()
 
         # Check if the sound is long enough, and if yes we extract some loops from it.
         # TODO: make this less restrictive to waste a bit less
@@ -111,16 +115,20 @@ class LoopScraper(BaseScraper):
                 sample = Sound.from_file(filename, start=offset, end=offset+self.sample_length)
                 loops = sample.extract_loops()
                 for loop in loops:
+                    id_counter += 1
+                    loop_id = '%s_%s' % (track_id, id_counter)
                     loop_path = self._get_free_path()
                     logger.info('loop extracted to %s' % loop_path)
                     loop.to_file(loop_path)
                     #key, key_confidence, length = loop.echonest.key, loop.echonest.key_confidence, loop.length
-                    length = loop.length
 
                     with self.pool_lock:
-                        self.pool.append({
+                        self.pool[loop_id] = dict(loop.loop_infos, **{
                             'path': loop_path,
-                            'length': length,
+                            'length': loop.length,
+                            'loop_id': loop_id,
+                            'timbre_start': loop.loop_infos['timbre_start'],
+                            'timbre_end': loop.loop_infos['timbre_end']
                             #'key': (key, key_confidence)
                         })
 
@@ -137,20 +145,33 @@ class LoopScraper(BaseScraper):
     @classmethod
     def gimme_loop_handler(cls, addr, tags, data, source):
         # time in seconds; key between 0 (for C) and 11 (for B)
-        required_length, required_key = data[0], data[1]
+        pd_track_id, required_length, required_key, previous_loop_id = data[0], data[1], data[2], data[3]
 
-        # Picking loop in the pool with closest required length
-        # time stretching it, apply some fade in / out.
+        # Picking the new loop in the pool
         with cls.pool_lock:
-            loop_infos = sorted(cls.pool, key=lambda l: abs(l['length'] - required_length))[0]
-            cls.pool.pop(cls.pool.index(loop_infos))
-        logger.info('sending new loop %s, still %s in pool' % (loop_infos['path'], len(cls.pool)))
+            if previous_loop_id != 'null':
+                loop_infos = sorted(
+                    cls.pool.values(),
+                    key=lambda l: loop_distance(cls.old_loops[previous_loop_id], l)
+                )[0]
+            else:
+                loop_infos = cls.pool.values()[0]
+            cls.pool.pop(loop_infos['loop_id'])
 
+        # Adding the picked looped to `old_loops`, so that we remember it
+        # but it cannot be used again.
+        with cls.old_loops_lock:
+            cls.old_loops[loop_infos['loop_id']] = loop_infos
+            if previous_loop_id != 'null': cls.old_loops.pop(previous_loop_id)
+
+        # Preparing the loop
+        logger.info('sending new loop %s, still %s in pool' % (loop_infos['path'], len(cls.pool)))
         loop = Sound.from_file(loop_infos['path'])
-        loop.time_stretch(required_length).fade(in_dur=0.003, out_dur=0.003).to_file(loop_infos['path'])
+        loop = loop.time_stretch(required_length).fade(in_dur=0.003, out_dur=0.003)
+        loop.to_file(loop_infos['path'])
 
         # Sending loop, and fill-up the pool if necessary.
-        send_msg('/new_loop', loop_infos['path'])
+        send_msg('/new_loop', pd_track_id, loop_infos['path'], int(loop.length * 1000), loop_infos['loop_id'])
         if len(LoopScraper.pool) < LoopScraper.pool_min_size: LoopScraper.wake_up_scrapers()
 
 
@@ -160,8 +181,11 @@ class PadScraper(BaseScraper):
     filename_prefix = 'pad'
 
     def scrape(self):
-        pad_path, pad_length = get_sound()
-        logger.info('pad extracted to %s' % pad_path)
+        track_id, pad_path, pad_length = get_sound()
+        new_pad_path = self._get_free_path()
+        pad_id = '%s' % (track_id)
+        convert_file(pad_path, 'wav', to_filename=new_pad_path)
+        logger.info('pad extracted to %s' % new_pad_path)
         '''pad.to_file(pad_path)
 
         # Delete the sound to save memory
@@ -171,14 +195,16 @@ class PadScraper(BaseScraper):
         gc.collect()'''
 
         with self.pool_lock:
-            self.pool.append({
-                'path': pad_path
-            })
+            self.pool[pad_id] = {
+                'path': new_pad_path,
+                'pad_id': pad_id
+            }
         
     @classmethod
     def gimme_pad_handler(cls, addr, tags, data, source):
         with cls.pool_lock:
-            pad_infos = cls.pool.pop(0)
+            pad_infos = cls.pool.values().pop(0)
+            cls.pool.pop(pad_infos['pad_id'])
         logger.info('sending new pad %s, still %s in pool' % (pad_infos['path'], len(cls.pool)))
         send_msg('/new_pad', pad_infos['path'])
         if len(PadScraper.pool) < PadScraper.pool_min_size: PadScraper.wake_up_scrapers()
@@ -223,7 +249,7 @@ if __name__ == '__main__':
     # Pre-downloading some sounds, and sending a message to the patch
     # when this is done.
     while(len(PadScraper.pool) < PadScraper.pool_min_size
-          or len(LoopScraper.pool) < LoopScraper.pool_min_size / 3.0):
+          or len(LoopScraper.pool) < LoopScraper.pool_min_size / 10.0):
         q = Queue()
         try: q.get(True, 5)
         except Empty: pass
