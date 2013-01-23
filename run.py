@@ -4,20 +4,21 @@ import sys
 import string
 import time
 
+import settings
+
 s = shout.Shout()
 print "Using libshout version %s" % shout.version()
 
-# s.host = 'localhost'
-# s.port = 8000
-# s.user = 'source'
+s.host = 'localhost'
+s.port = settings.icecast['port']
 s.password = settings.icecast['password']
 s.mount = settings.icecast['mount']
-# s.format = 'vorbis' | 'mp3'
-# s.protocol = 'http' | 'xaudiocast' | 'icy'
+# s.format = 'vorbis'
+# s.protocol = 'http'
 # s.name = ''
 # s.genre = ''
 # s.url = ''
-# s.public = 0 | 1
+# s.public = 1
 # s.audio_info = { 'key': 'val', ... }
 #  (keys are shout.SHOUT_AI_BITRATE, shout.SHOUT_AI_SAMPLERATE,
 #   shout.SHOUT_AI_CHANNELS, shout.SHOUT_AI_QUALITY)
