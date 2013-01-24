@@ -1,3 +1,4 @@
+import cStringIO as StringIO
 from tempfile import NamedTemporaryFile
 import os
 import math
@@ -6,9 +7,13 @@ import wave
 import subprocess
 
 
-def write_wav(f, data):
+def wav_to_string(data):
     data = numpy.array(data, dtype=numpy.float32) * (2**15 - 0.5)
-    data = data.astype(numpy.uint16).tostring('F')
+    return data.astype(numpy.uint16).tostring()
+    
+
+def write_wav(f, data):
+    data = wav_to_string(data)
     fd = wave.open(f, mode='wb')
     fd.setnchannels(1)
     fd.setsampwidth(2)
@@ -85,6 +90,32 @@ def convert_file(filename, to_format, to_filename=None):
     return to_filename
 
 
+class OggEncoder(object):
+    
+    def __init__(self):
+        #self._in = file()
+        self._out = StringIO.StringIO()
+        self.oggenc = subprocess.Popen(['oggenc', '-', '-r', '-C', '1', '-B', '16', '-R', '44100'],
+                        stdout=subprocess.PIPE,
+                                    stdin=subprocess.PIPE, stderr=subprocess.STDOUT)
+        
+    def encode(self, data):
+        import time
+        data = StringIO.StringIO(wav_to_string(data))
+        out = ''
+        print self.oggenc.poll()
+        while True:
+            stdin_data = data.read(64)
+            if not stdin_data: break
+            print stdin_data
+            stdout_data, stderr_data = self.oggenc.communicate(input=stdin_data)
+            #time.sleep(1)
+            print 'read %s bytes' % len(stdout_data)
+            print self.oggenc.poll()
+            out += stdout_data
+        return out
+
+
 def guess_fileformat(filename):
     # Get the format of the file
     try:
@@ -94,7 +125,6 @@ def guess_fileformat(filename):
 
 
 if __name__ == '__main__':
-
     import math
     phase = 0
     K = 2 * math.pi * 440 / 44100
@@ -105,5 +135,11 @@ if __name__ == '__main__':
             yield math.cos(phase)
     data_gen = next_frame()
     data = [data_gen.next() for i in range(44100)]
+
     write_wav('test.wav', data)
-    
+
+    enc = OggEncoder()
+    encoded = enc.encode(data)
+    print len(encoded)
+    with open('test.ogg', 'wb') as fd:
+        fd.write(encoded)
