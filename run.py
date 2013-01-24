@@ -1,31 +1,8 @@
-# usage: ./example.py /path/to/file1 /path/to/file2 ...
-import shout
 import sys
-import string
-import time
+import subprocess
 
 import settings
-from fileutils import convert_file, write_wav
-
-s = shout.Shout()
-print "Using libshout version %s" % shout.version()
-
-s.host = 'localhost'
-s.port = settings.icecast['port']
-s.password = settings.icecast['password']
-s.mount = settings.icecast['mount']
-s.format = 'vorbis'
-# s.protocol = 'http'
-# s.name = ''
-# s.genre = ''
-# s.url = ''
-# s.public = 1
-# s.audio_info = { 'key': 'val', ... }
-#  (keys are shout.SHOUT_AI_BITRATE, shout.SHOUT_AI_SAMPLERATE,
-#   shout.SHOUT_AI_CHANNELS, shout.SHOUT_AI_QUALITY)
-
-s.open()
-#s.set_metadata({'song': 'blabal.ogg'})
+from fileutils import wav_to_string
 
 
 def next_frame():
@@ -37,20 +14,13 @@ def next_frame():
         yield math.cos(phase)
 
 
+ices2 = subprocess.Popen(['ices2', 'ices.xml'], stdout=subprocess.PIPE, stdin=subprocess.PIPE, stderr=subprocess.STDOUT)
+
 while True:
     data_gen = next_frame()
-    data = [data_gen.next() for i in range(441000)]
-    write_wav('/tmp/temp.wav', data)
-    converted_filename = convert_file('/tmp/temp.wav', 'ogg', '/tmp/temp.ogg')
-    print 'Data generated'
-    with open(converted_filename) as fd:
-        while True:
-            print 'read'
-            buf = fd.read(4096)
-            if not buf: break
-            s.send(buf)
-            s.sync()
-f.close()
+    data = [data_gen.next() for i in range(4410)]
+    data = wav_to_string(data)
+    ices2.stdin.write(data)
     
-
-print s.close()
+    print 'written'
+    
