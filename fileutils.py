@@ -1,4 +1,5 @@
 from tempfile import NamedTemporaryFile
+import os
 import math
 import numpy
 import wave

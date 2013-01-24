@@ -14,7 +14,7 @@ s.host = 'localhost'
 s.port = settings.icecast['port']
 s.password = settings.icecast['password']
 s.mount = settings.icecast['mount']
-# s.format = 'vorbis'
+s.format = 'vorbis'
 # s.protocol = 'http'
 # s.name = ''
 # s.genre = ''
@@ -32,7 +32,6 @@ def next_frame():
     import math
     phase = 0
     K = 2 * math.pi * 440 / 44100
-    global phase, K
     while(True):
         phase += K
         yield math.cos(phase)
@@ -40,11 +39,13 @@ def next_frame():
 
 while True:
     data_gen = next_frame()
-    data = [data_gen.next() for i in range(44100)]
+    data = [data_gen.next() for i in range(441000)]
     write_wav('/tmp/temp.wav', data)
-    converted_filename = convert_file('/tmp/temp.wav', 'ogg')
+    converted_filename = convert_file('/tmp/temp.wav', 'ogg', '/tmp/temp.ogg')
+    print 'Data generated'
     with open(converted_filename) as fd:
         while True:
+            print 'read'
             buf = fd.read(4096)
             if not buf: break
             s.send(buf)
