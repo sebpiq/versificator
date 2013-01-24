@@ -5,6 +5,7 @@ import string
 import time
 
 import settings
+from fileutils import convert_file, write_wav
 
 s = shout.Shout()
 print "Using libshout version %s" % shout.version()
@@ -26,25 +27,29 @@ s.mount = settings.icecast['mount']
 s.open()
 #s.set_metadata({'song': 'blabal.ogg'})
 
-total = 0
-st = time.time()
-for fa in sys.argv[1:]:
-    print "opening file %s" % fa
-    f = open(fa)
 
-    nbuf = f.read(4096)
-    while 1:
-        buf = nbuf
-        nbuf = f.read(4096)
-        total = total + len(buf)
-        if len(buf) == 0:
-            break
-        s.send(buf)
-        s.sync()
-    f.close()
+def next_frame():
+    import math
+    phase = 0
+    K = 2 * math.pi * 440 / 44100
+    global phase, K
+    while(True):
+        phase += K
+        yield math.cos(phase)
+
+
+while True:
+    data_gen = next_frame()
+    data = [data_gen.next() for i in range(44100)]
+    write_wav('/tmp/temp.wav', data)
+    converted_filename = convert_file('/tmp/temp.wav', 'ogg')
+    with open(converted_filename) as fd:
+        while True:
+            buf = fd.read(4096)
+            if not buf: break
+            s.send(buf)
+            s.sync()
+f.close()
     
-    et = time.time()
-    br = total*0.008/(et-st)
-    print "Sent %d bytes in %d seconds (%f kbps)" % (total, et-st, br)
 
 print s.close()
