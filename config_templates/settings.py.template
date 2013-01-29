@@ -1,0 +1,16 @@
+import logging
+# Application logger
+LOG_LEVEL = logging.INFO
+logger = logging.getLogger('versificator')
+handler = logging.StreamHandler()
+logger.setLevel(LOG_LEVEL)
+handler.setLevel(LOG_LEVEL)
+
+app_root = '/path/to/app/'
+echonest_api_key = 'SECRET'
+
+icecast = dict(
+    password='PASSWD',
+    mount='/shoutpy.ogg',
+    port=8000,
+)

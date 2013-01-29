@@ -1,8 +1,0 @@
-app_root = '/path/to/app/'
-echonest_api_key = 'SECRET'
-
-icecast = dict(
-    password='PASSWD',
-    mount='/shoutpy.ogg',
-    port=8000,
-)
