@@ -21,13 +21,33 @@ import subprocess
 import threading
 from Queue import Queue, Empty
 
+from pychedelic.utils.files import samples_to_string
+import numpy as np
+
 from scrapers import SoundScraper
 
 
-block_size = 1024
-sound_queue = Queue()
+block_size = 2**15
+sound_queue = Queue(maxsize=100)
 
 #SoundScraper.wake_up(3)
+
+class SoundProducer(threading.Thread):
+    
+    def __init__(self, *args, **kwargs):
+        super(SoundProducer, self).__init__(*args, **kwargs)
+        self.daemon = True
+
+    def run(self):
+        import math
+        phase = 0
+        K = 2 * math.pi * 440 / 44100
+        while True:
+            data = []
+            for i in range(block_size):
+                phase += K
+                data.append(math.cos(phase))
+            sound_queue.put(samples_to_string(np.array(data, dtype=np.float32)))
 
 
 class SoundConsumer(threading.Thread):
@@ -40,32 +60,19 @@ class SoundConsumer(threading.Thread):
 
     def run(self):
         while True:
-            data = sound_queue.get()
+            try:
+                data = sound_queue.get_nowait()
+            except Empty:
+                logger.error('consumer starved')
+                data = sound_queue.get()
             self.ices.stdin.write(data)
+            
 
-
-class SoundProducer(threading.Thread):
-    
-    def __init__(self, *args, **kwargs):
-        super(SoundProducer, self).__init__(*args, **kwargs)
-        self.daemon = True
-
-    def run(self):
-        import math
-        phase = 0
-        K = 2 * math.pi * 440 / 44100
-        while(True):
-            data = []
-            for i in range(block_size):
-                phase += K
-                data.append(math.cos(phase))
-            sound_queue.put(data)
-
-
-consumer = SoundConsumer()
-consumer.start()
 producer = SoundProducer()
 producer.start()
+consumer = SoundConsumer()
+t = threading.Timer(2.0, consumer.start)
+t.start()
 
 while(True):
     q = Queue()
