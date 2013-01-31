@@ -52,14 +52,17 @@ class WavFileConsumer(BaseConsumer):
 
     def run(self):
         self.fd = wave.open(self.path, mode='wb')
-        self.fd.setnchannels(1)
+        self.fd.setnchannels(2)
         self.fd.setsampwidth(2)
         self.fd.setframerate(44100)
+        written = 0
         while self.running:
             try:
                 data = self.queue.get(5)
             except Queue.Empty:
                 pass
             else:
+                written += len(data)
                 self.fd.writeframes(data)
+        print 'written %s bytes to file' % written
         self.fd.close()

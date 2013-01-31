@@ -24,6 +24,8 @@ from Queue import Queue, Empty
 import numpy as np
 
 from scrapers import SoundScraper
+from producers import VersProducer, OscProducer
+from consumers import IcesConsumer, WavFileConsumer
 
 
 def wait(time):
@@ -35,15 +37,19 @@ def wait(time):
     except Empty: pass
 
 
-sound_queue = Queue(maxsize=100)
-SoundScraper.wake_up(1)
-wait(60)    
+queue = Queue(maxsize=100)
+#SoundScraper.wake_up(1)    
 
-'''
-producer = SoundProducer()
+producer = VersProducer(queue=queue)
 producer.start()
-consumer = SoundConsumer()
+consumer = WavFileConsumer(queue=queue, path='test.wav')
 t = threading.Timer(2.0, consumer.start)
-t.start()'''
+t.start()
 
-while(True): wait(30)
+wait(30)
+print 'now stop'
+consumer.running = False
+while consumer.is_alive(): wait(0.5)
+print 'file written'
+
+#while(True): wait(30)

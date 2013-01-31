@@ -114,6 +114,7 @@ class SoundScraper(threading.Thread):
         loops = filter(lambda bar: bar['loop_quality'] < 60, bars)
         for loop in loops:
             loop['track_id'] = track_id
+            loop['path'] = filename
             settings.db.loops.insert(loop)
         logger.info('extracted %s loops' % len(loops))
 
