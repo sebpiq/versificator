@@ -29,24 +29,36 @@ import gc
 import settings
 logger = settings.logger
 
+import numpy as np
 import requests
-# Less log messages from requests
 requests_log = logging.getLogger('requests')
 requests_log.setLevel(logging.WARNING)
 import soundcloud
+client = soundcloud.Client(client_id=settings.soundcloud_api_key)
 from pyechonest import track as echonest_track
 from pyechonest.util import EchoNestAPIError
 from pyechonest import config
 config.ECHO_NEST_API_KEY = settings.echonest_api_key
 from pychedelic import Sound
-import pymongo
-connection = pymongo.MongoClient('localhost', 27017)
-db = connection.versificator
+
+
+params = {
+    'seg': {
+        'confidence_low': 0.1
+    },
+    'beat': {
+        'confidence_low': 0.1
+    },
+    'bar': {
+        'confidence_low': 0.1
+    },
+}
+
 
 
 class SoundScraper(threading.Thread):
 
-    pool_lock = threading.RLock()  # Lock to access the pool
+    pool_lock = threading.RLock()   # Lock to access the pool
     sample_length = 20              # Length (in s.) to sample from the original sound
 
     def __init__(self, *args, **kwargs):
@@ -54,7 +66,7 @@ class SoundScraper(threading.Thread):
         self.daemon = True
 
     def run(self):
-        while (len(self.pool) < self.pool_min_size):
+        while True: # TODO
             # Protect from exceptions
             try:
                 # We always have at least `pool_min_size` loops in our pool
@@ -67,46 +79,43 @@ class SoundScraper(threading.Thread):
         """
         This is called in a loop by `run` to fill-up the pool.
         """
-        id_counter = 0
         track_id, filename = get_sound()
+        logger.info('uploading track %s to the echonest' % track_id)
         track = echonest_track.track_from_filename(filename)
 
-        segments = filter(lambda seg: seg['confidence'] > 0.1, track.segments)
-        bars = filter(lambda bar: bar['confidence'] > 0.1, track.bars)
-        beats = filter(lambda beat: beat['confidence'] > 0.1, track.beats)
+        segments = filter(lambda seg: seg['confidence'] > params['seg']['confidence_low'], track.segments)
+        bars = filter(lambda bar: bar['confidence'] > params['bar']['confidence_low'], track.bars)
+        beats = filter(lambda beat: beat['confidence'] > params['beat']['confidence_low'], track.beats)
         segments = map(lambda seg: AudioQuantum(seg), segments)
         bars = map(lambda bar: AudioQuantum(bar), bars)
         beats = map(lambda beat: AudioQuantum(beat), beats)
 
         for bar in bars:
             bar_segments = filter(lambda seg: seg.overlap(bar), segments)
-            bar['tempo'] = analysis.tempo # TODO: better tempo ?
+            bar['tempo'] = track.tempo # TODO: better tempo ?
+            timbres = map(lambda seg: seg['timbre'], bar_segments)
+            timbres = np.array(timbres)
 
-            # Calculates a loop quality attribute
+            # Calculates a loop quality attribute :
+            # we take the standard deviation of timbre over all segments
+            # of the bar. If too much segments, we just give up.
             if len(bar_segments) == 1:
                 bar['loop_quality'] = 0
-            elif len(bar_segments) == 2:
-                bar['loop_quality'] = euclidian_distance(
-                    np.array(bar_segments[0]['timbre']),
-                    np.array(bar_segments[1]['timbre'])
-                )
             else:
-                bar['loop_quality'] = 100000
+            #elif len(bar_segments) < 20:
+                bar['loop_quality'] = timbres.std(axis=0).mean()
+            #else:
+            #    continue
 
-            # Calculates the timbre values at the start of the loop,
-            # and at the end of the loop. 
-            if bar_segments:            
-                bar['timbre_start'] = bar_segments[0]['timbre']
-                bar['timbre_end'] = bar_segments[-1]['timbre']
-            else:
-                bar['timbre_start'] = None
-                bar['timbre_end'] = None
+            #import pdb; pdb.set_trace()
+            #bar['timbre'] = timbres.mean(axis=0)
 
         # Filter only bars that make good loops
         loops = filter(lambda bar: bar['loop_quality'] < 60, bars)
         for loop in loops:
             loop['track_id'] = track_id
-            db.loops.insert(loop)
+            settings.db.loops.insert(loop)
+        logger.info('extracted %s loops' % len(loops))
 
     @classmethod
     def wake_up(cls, how_many=1):
@@ -117,15 +126,8 @@ class SoundScraper(threading.Thread):
 def get_sound():
     """
     Downloads a random sound from soundcloud, saves it and returns 
-    the filename and the sound length in seconds.
+    the trackid and the filename.
     """
-    global count
-    count = (count + 1) % len(mp3s)
-    return random.randint(0, 100000), '/home/spiq/versificator/downloads/' + mp3s[count], 120.0
-
-    #return random.randint(0, 100000), '/home/spiq/versificator/downloads/54691.mp3', 60
-    # create a client object with your app credentials
-    client = soundcloud.Client(client_id='YOUR_CLIENT_ID')
     track, resp = None, None
     while (True):
         # Get a random track
@@ -134,8 +136,10 @@ def get_sound():
             try:
                 track = client.get('/tracks/%s' % track_id)
             except requests.exceptions.HTTPError as exc:
-                if exc.response.status_code != 404: logger.error(exc)
-                else: logger.debug('%s - %s' % (exc, track_id))
+                if exc.response.status_code in [404, 401]:
+                    logger.info('%s : %s' % (exc, '/tracks/%s' % track_id))
+                else:
+                    logger.error('%s - %s' % (exc, track_id))
                 continue
             else: break
 

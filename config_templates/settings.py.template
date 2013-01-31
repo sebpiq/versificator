@@ -5,9 +5,15 @@ logger = logging.getLogger('versificator')
 handler = logging.StreamHandler()
 logger.setLevel(LOG_LEVEL)
 handler.setLevel(LOG_LEVEL)
+logger.addHandler(handler)
+
+import pymongo
+connection = pymongo.MongoClient('localhost', 27017)
+db = connection.versificator
 
 app_root = '/path/to/app/'
 echonest_api_key = 'SECRET'
+soundcloud_api_key = 'SECRET'
 
 icecast = dict(
     password='PASSWD',
