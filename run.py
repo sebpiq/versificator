@@ -77,15 +77,17 @@ def extract_loop(sound):
     bpms, energies = get_tempo(sound)
     bpms_data = DataSet(bpms, data=energies)
     bpms_data = bpms_data.smooth().maxima()
-    bpm = bpms_data.axes[0][bpms_data.data == np.amax(bpms_data.data)][0]
-    while(True):
-        bpm /= 2.0
-        lower = bpm - bpm * 0.02
-        upper = bpm + bpm * 0.02
-        for possible in bpms_data.axes[0]:
-            if possible > lower and possible < upper: break
-        else: break
-    loop_length = 60.0 / bpm
+    if bpms_data.data.size:
+        bpm = bpms_data.axes[0][bpms_data.data == np.amax(bpms_data.data)][0]
+        while(True):
+            bpm /= 2.0
+            lower = bpm - bpm * 0.02
+            upper = bpm + bpm * 0.02
+            for possible in bpms_data.axes[0]:
+                if possible > lower and possible < upper: break
+            else: break
+        loop_length = 60.0 / bpm
+    else: loop_length = 1.0
     offset = sound.axes[0][0]
     sound = sound[offset:offset + loop_length]
 
